@@ -1,0 +1,113 @@
+<?php
+
+/**
+ * @file
+ * Module file for 'Dynamic year select'.
+ */
+
+use Drupal\Core\Form\FormStateInterface;
+use Drupal\Core\StringTranslation\TranslatableMarkup;
+use Drupal\node\Entity\Node;
+use Drupal\Core\Entity\EntityInterface;
+use Drupal\Core\Datetime\DrupalDateTime;
+use Drupal\Core\Cache\Cache;
+
+/**
+ * Implements hook_preprocess_HOOK().
+ */
+function dynamic_views_preprocess_page(array &$variables) {
+  $variables['#attached']['library'][] = 'dynamic_views/dynamic_views';
+}
+
+/**
+ * Implements hook_form_FORM_ID_alter().
+ */
+function dynamic_views_form_views_exposed_form_alter(&$form, FormStateInterface $form_state, $form_id) {
+  if (isset($form['#id']) && $form['#id'] === 'views-exposed-form-congress-block-1') {
+
+    // Set default month filter value.
+    $request = \Drupal::request();
+    if ($request->query->has('month') && ($month = date_parse($request->query->get('month'))['month'])) {
+      $form['field_month_computed_value']['#default_value'] = $month;
+    }
+    elseif ($request->query->has('year') && $request->query->get('year') !== date('Y')) {
+      $form['field_month_computed_value']['#default_value'] = 1;
+    }
+    else {
+      $form['field_month_computed_value']['#default_value'] = date('n');
+    }
+
+    // Set default year filter value and options.
+    $currentYear = date('Y');
+    $options = &drupal_static(__FUNCTION__);
+    if (is_null($options)) {
+      $cid = 'dynamic_views:congress:year';
+      $data = \Drupal::cache()->get($cid);
+      if (!$data) {
+        $options = [];
+        $options['all'] = new TranslatableMarkup('- All -');
+        $query = \Drupal::entityQuery('node');
+        $query->condition('type', 'congress')
+          ->condition('status', 1)
+          ->sort('field_date_range', 'ASC');
+        $result = $query->execute();
+        if ($result) {
+          $nodes = Node::loadMultiple($result);
+          foreach ($nodes as $node) {
+            $date = $node->field_date_range->value;
+            if ($date) {
+              $date = new DrupalDateTime($date, new DateTimeZone('UTC'));
+              $year = $date->format('Y');
+              if (!isset($options[$year])) {
+                $options[$year] = $year;
+              }
+            }
+          }
+        }
+      }
+      else {
+        $options = $data->data;
+      }
+    }
+
+    $form['year'] = [
+      '#id' => 'yer-list',
+      '#title' => new TranslatableMarkup(''),
+      '#type' => 'radios',
+      '#options' => $options,
+      '#size' => NULL,
+      '#default_value' => $currentYear,
+      '#checked' => 'checked',
+      '#cache' => [
+        'contexts' => [
+          'user',
+          'user.roles',
+        ],
+      ],
+    ];
+  }
+}
+
+/**
+ * Implements hook_ENTITY_TYPE_presave().
+ */
+function dynamic_views_node_presave(EntityInterface $entity) {
+  $bundle = $entity->bundle();
+  if ($bundle === 'congress') {
+    // Check if a congress updated has a new year, and invalidate the
+    // options cached used in the custom views filter for filtering by year.
+    $cid = 'dynamic_views:congress:year';
+    $data = \Drupal::cache()->get($cid);
+    if ($data) {
+      $options = $data->data;
+      $date = $entity->field_date_range->value;
+      if ($date) {
+        $date = new DrupalDateTime($date, new DateTimeZone('UTC'));
+        $year = $date->format('Y');
+        if (!isset($options[$year])) {
+          Cache::invalidateTags(['node:congress:year']);
+        }
+      }
+    }
+  }
+}
