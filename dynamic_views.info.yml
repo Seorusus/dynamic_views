@@ -1,5 +1,5 @@
-name: 'Pfallabouth year select'
-description: 'Dynamic year select on Congress calendar pages'
+name: 'Dynamic year select'
+description: 'Dynamic year select on calendar pages'
 core: 8.x
 type: module
-package: Pfallabouth
+package: Custom
